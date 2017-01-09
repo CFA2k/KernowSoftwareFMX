@@ -47,6 +47,9 @@ uses FMX.Controls, FMX.Graphics, System.UITypes, FMX.Types, Types, System.UICons
 implementation
 
 uses FMX.Platform, FMX.Forms,  SysUtils, FMX.TextLayout, Math, FMX.Utils
+  {$IFDEF IOS}
+  , IOSApi.Foundation
+  {$ENDIF}
   {$IFDEF USE_TMS_HTML_ENGINE} , FMX.TMSHTMLEngine {$ENDIF}
   ;
 
@@ -66,17 +69,26 @@ begin
   end;
   Service := IFMXScreenService(TPlatformServices.Current.GetPlatformService(IFMXScreenService));
 
-  Result := Trunc(Service.GetScreenScale);
+  Result := Service.GetScreenScale;
 
   {$IFDEF IOS}
   if Result < 2 then
    Result := 2;
   {$ENDIF}
+
   AScreenScale := Result;
 end;
 
 
 procedure ProcessMessages;
+{$IFDEF IOS}
+var
+  TimeoutDate: NSDate;
+begin
+  TimeoutDate := TNSDate.Wrap(TNSDate.OCClass.dateWithTimeIntervalSinceNow(0.0));
+  TNSRunLoop.Wrap(TNSRunLoop.OCClass.currentRunLoop).runMode(NSDefaultRunLoopMode, TimeoutDate);
+end;
+{$ELSE}
 begin
   // FMX can occasionally raise an exception.
   try
@@ -85,6 +97,7 @@ begin
     //
   end;
 end;
+{$ENDIF}
 
 function GetColorOrDefault(AColor, ADefaultIfNull: TAlphaColor): TAlphaColor;
 begin

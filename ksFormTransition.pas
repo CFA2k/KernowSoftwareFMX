@@ -34,6 +34,7 @@ uses System.UITypes, FMX.Controls, FMX.Layouts, FMX.Objects, System.Classes,
 
 const
   C_TRANSITION_DELAY = 0.3;
+  C_TRANSITION_FADE  = 0.3;
   C_TRANSITION_PART_SCROLL_FACTOR = 0.3;
   C_INTERPOLATION_TYPE = TInterpolationType.Quadratic;
   C_ANIMATION_TYPE  = TAnimationType.InOut;
@@ -49,6 +50,20 @@ type
                            ksFtSlideOutToTop,
                            ksFtSlideOutToRight,
                            ksFtSlideOutToBottom);
+
+  TksFormImage = class(TImage)
+  private
+    FRectangle: TRectangle;
+    procedure SetFade(const Value: single);
+    function GetFade: single;
+  public
+    constructor Create(AOwner: TComponent); override;
+    destructor Destroy; override;
+    procedure Fade;
+    procedure UnFade;
+  published
+    property FadeValue: single read GetFade write SetFade;
+  end;
 
   TksFormTransitionInfo = class
   private
@@ -77,10 +92,11 @@ type
   private
     FPreventAdd: Boolean;
     procedure AddBorder(ABmp: TBitmap; ABorder: TSide);
-    procedure AnimateImage(AImage: TImage; ADirection: TAnimateDirection; ANewValue: single; AWait: Boolean);
+    procedure AnimateImage(AImage: TksFormImage; ADirection: TAnimateDirection;
+      ANewValue: single; AWait: Boolean);
     class function GenerateFormImage(AForm: TForm): TBitmap;
     procedure PushForm(AFrom, ATo: TForm; ATransition: TksFormTransitionType; const ScrollBackgroundForm: Boolean = True);
-    procedure PopForm;
+    procedure PopForm(const Animate: Boolean = True);
     procedure PopAllForms;
   public
     constructor Create(AOwner: TComponent); override;
@@ -93,6 +109,10 @@ type
   procedure PushForm(AFrom, ATo: TForm; ATransition: TksFormTransitionType; const ScrollBackgroundForm: Boolean = True);
   procedure PopForm;
   procedure PopAllForms;
+  procedure ClearTransitionTrail;
+
+var
+  TransitionFading: Boolean;
 
 implementation
 
@@ -112,7 +132,8 @@ procedure PushForm(AFrom, ATo: TForm; ATransition: TksFormTransitionType; const 
 var
   ATran: TksFormTransition;
 begin
-  ATran := TksFormTransition.Create(nil);
+  if AAnimating then
+    Exit;  ATran := TksFormTransition.Create(nil);
   try
     ATran.PushForm(AFrom, ATo, ATransition, ScrollBackgroundForm);
   finally
@@ -124,12 +145,19 @@ procedure PopForm;
 var
   ATran: TksFormTransition;
 begin
+  if AAnimating then
+    Exit;
   ATran := TksFormTransition.Create(nil);
   try
     ATran.PopForm;
   finally
     ATran.DisposeOf;
   end;
+end;
+
+procedure ClearTransitionTrail;
+begin
+  ATransitionList.Clear;
 end;
 
 procedure PopAllForms;
@@ -145,12 +173,12 @@ begin
 end;
 
 procedure TksFormTransition.AddBorder(ABmp: TBitmap; ABorder: TSide);
-var
+{var
   ASides: TSides;
   ASaveState: TCanvasSaveState;
-  ARect: TRectF;
+  ARect: TRectF;}
 begin
-  ASides := [ABorder];
+ { ASides := [ABorder];
   ASaveState := ABmp.Canvas.SaveState;
   try
     ABmp.Canvas.BeginScene;
@@ -166,10 +194,11 @@ begin
   finally
     ABmp.Canvas.RestoreState(ASaveState);
   end;
-  Application.ProcessMessages;
+  Application.ProcessMessages;}
 end;
 
-procedure TksFormTransition.AnimateImage(AImage: TImage; ADirection: TAnimateDirection; ANewValue: single; AWait: Boolean);
+procedure TksFormTransition.AnimateImage(AImage: TksFormImage; ADirection: TAnimateDirection;
+  ANewValue: single; AWait: Boolean);
 var
   AProperty: string;
 begin
@@ -184,6 +213,10 @@ begin
     //
   end;
   //Application.ProcessMessages;
+  //AImage.Fade := 0;
+  //if AFade then
+ //   AImage.Fade;
+
   case AWait of
     False: TAnimator.AnimateFloat(AImage, 'Position.'+AProperty, ANewValue, C_TRANSITION_DELAY);
     True: TAnimator.AnimateFloatWait(AImage, 'Position.'+AProperty, ANewValue, C_TRANSITION_DELAY);
@@ -211,7 +244,7 @@ begin
   Result.Canvas.EndScene;
 end;
 
-procedure TksFormTransition.PopForm;
+procedure TksFormTransition.PopForm(const Animate: Boolean = True);
 var
   AInfo: TksFormTransitionInfo;
 begin
@@ -220,39 +253,50 @@ begin
   AInfo := ATransitionList.Last;
 
   FPreventAdd := True;
+  //if Animate then
   PushForm(AInfo.FormTo, AInfo.FormFrom, AInfo.ReverseTransition, AInfo.BackgroundScroll);
   FPreventAdd := False;
+  Application.ProcessMessages;
   ATransitionList.Delete(ATransitionList.Count-1);
 end;
 
 procedure TksFormTransition.PopAllForms;
+var
+  AFirst: TksFormTransitionInfo;
+  ALast: TksFormTransitionInfo;
 begin
-  ATransitionList.Clear;
+  if ATransitionList.Count = 0 then
+    Exit;
+  ALast := ATransitionList.Last;
+  AFirst := ATransitionList.First;
+  FPreventAdd := True;
+  //if Animate then
+  PushForm(ALast.FormTo, AFirst.FormFrom, ALast.ReverseTransition, ALast.BackgroundScroll);
+  FPreventAdd := False;
+  ClearTransitionTrail;
+  Application.ProcessMessages;
 end;
 
 procedure TksFormTransition.PushForm(AFrom, ATo: TForm;
   ATransition: TksFormTransitionType; const ScrollBackgroundForm: Boolean = True);
 var
-  AImageFrom: TImage;
-  AImageTo: TImage;
+  AImageFrom: TksFormImage;
+  AImageTo: TksFormImage;
   ABmp: TBitmap;
 begin
   if AAnimating then
     Exit;
   AAnimating := True;
 
-  ATo.Invalidate;
-
   if FPreventAdd = False then
     ATransitionList.AddTransition(AFrom, ATo, ATransition, ScrollBackgroundForm);
 
 
-  AImageFrom := TImage.Create(nil);
-  AImageTo := TImage.Create(nil);
+  AImageFrom := TksFormImage.Create(nil);
+  AImageTo := TksFormImage.Create(nil);
   try
-    ATo.HandleNeeded;
-    ATo.Invalidate;
-    Application.ProcessMessages;
+    ATo.SetBounds(AFrom.Left, AFrom.Top, AFrom.Width, AFrom.Height);
+    AFrom.SetBounds(AFrom.Left, AFrom.Top, AFrom.Width, AFrom.Height);
 
     AImageFrom.Width := AFrom.Width;
     AImageFrom.Height := AFrom.Height;
@@ -273,6 +317,7 @@ begin
     AImageTo.Position.X := 0;
     AImageTo.Position.Y := 0;
     AFrom.AddObject(AImageTo);
+    Application.ProcessMessages;
     ABmp := TksFormTransition.GenerateFormImage(ATo);
     try
       AImageTo.Bitmap := ABmp;
@@ -309,8 +354,10 @@ begin
       begin
         AImageTo.BringToFront;
         AddBorder(AImageTo.Bitmap, TSide.Left);
+        AImageFrom.Fade;
         if ScrollBackgroundForm then
           AnimateImage(AImageFrom, ksAdHorizontal, 0-(AImageFrom.Width * C_TRANSITION_PART_SCROLL_FACTOR), False);
+          //TAnimator.AnimateFloat(AImageFrom, 'Fade', 0.5, C_TRANSITION_DELAY);
         AnimateImage(AImageTo, ksAdHorizontal, 0, True);
       end;
 
@@ -318,6 +365,7 @@ begin
       begin
         AImageTo.BringToFront;
         AddBorder(AImageTo.Bitmap, TSide.Right);
+        AImageFrom.Fade;
         if ScrollBackgroundForm then
           AnimateImage(AImageFrom, ksAdHorizontal, AImageFrom.Width * C_TRANSITION_PART_SCROLL_FACTOR, False);
         AnimateImage(AImageTo, ksAdHorizontal, 0, True);
@@ -327,6 +375,7 @@ begin
       ksFtSlideInFromBottom:
       begin
         AddBorder(AImageTo.Bitmap, TSide.Top);
+        AImageFrom.Fade;
         if ScrollBackgroundForm then
           AnimateImage(AImageFrom, ksAdVertical, 0-(AImageFrom.Height * C_TRANSITION_PART_SCROLL_FACTOR), False);
         AnimateImage(AImageTo, ksAdVertical, 0, True);
@@ -335,6 +384,7 @@ begin
       ksFtSlideInFromTop:
       begin
         AddBorder(AImageTo.Bitmap, TSide.Bottom);
+        AImageFrom.Fade;
         if ScrollBackgroundForm then
           AnimateImage(AImageFrom, ksAdVertical, AImageFrom.Height * C_TRANSITION_PART_SCROLL_FACTOR, False);
         AnimateImage(AImageTo, ksAdVertical, 0, True);
@@ -344,6 +394,7 @@ begin
       ksFtSlideOutToLeft:
       begin
         AddBorder(AImageFrom.Bitmap, TSide.Right);
+        AImageTo.UnFade;
         if ScrollBackgroundForm then
           AnimateImage(AImageTo, ksAdHorizontal, 0, False);
         AnimateImage(AImageFrom, ksAdHorizontal, 0-AImageFrom.Width, True);
@@ -353,6 +404,7 @@ begin
       ksFtSlideOutToTop:
       begin
         AddBorder(AImageFrom.Bitmap, TSide.Bottom);
+        AImageTo.UnFade;
         if ScrollBackgroundForm then
           AnimateImage(AImageTo, ksAdVertical, 0, False);
         AnimateImage(AImageFrom, ksAdVertical, 0-AImageFrom.Height, True);
@@ -361,6 +413,7 @@ begin
       ksFtSlideOutToRight:
       begin
         AddBorder(AImageFrom.Bitmap, TSide.Left);
+        AImageTo.UnFade;
         if ScrollBackgroundForm then
           AnimateImage(AImageTo, ksAdHorizontal, 0, False);
         AnimateImage(AImageFrom, ksAdHorizontal, AImageFrom.Width, True);
@@ -369,6 +422,7 @@ begin
       ksFtSlideOutToBottom:
       begin
         AddBorder(AImageFrom.Bitmap, TSide.Top);
+        AImageTo.UnFade;
         if ScrollBackgroundForm then
           AnimateImage(AImageTo, ksAdVertical, 0, False);
         AnimateImage(AImageFrom, ksAdVertical, AImageFrom.Height, True);
@@ -418,9 +472,62 @@ begin
 
 end;
 
+{ TksFormImage }
+
+constructor TksFormImage.Create(AOwner: TComponent);
+begin
+  inherited;
+  FRectangle := TRectangle.Create(Self);
+  FRectangle.Align := TAlignLayout.Client;
+  FRectangle.Fill.Color := claBlack;
+  FRectangle.Fill.Kind := TBrushKind.Solid;
+
+  FRectangle.Opacity := 0;
+  AddObject(FRectangle);
+end;
+
+destructor TksFormImage.Destroy;
+begin
+  {$IFDEF IOS}
+  FRectangle.DisposeOf;
+  {$ELSE}
+  FRectangle.Free;
+  {$ENDIF}
+  inherited;
+end;
+
+procedure TksFormImage.Fade;
+begin
+  FRectangle.Opacity := 0;
+  if TransitionFading then
+    TAnimator.AnimateFloat(Self, 'FadeValue', C_TRANSITION_FADE, C_TRANSITION_DELAY);
+end;
+
+function TksFormImage.GetFade: single;
+begin
+  Result := FRectangle.Opacity;
+end;
+
+procedure TksFormImage.SetFade(const Value: single);
+begin
+  FRectangle.Opacity := Value;
+end;
+
+procedure TksFormImage.UnFade;
+begin
+  if TransitionFading = False then
+  begin
+    FRectangle.Opacity := 0;
+    Exit;
+  end;
+  FRectangle.Opacity := C_TRANSITION_FADE;
+  TAnimator.AnimateFloat(Self, 'FadeValue', 0, C_TRANSITION_DELAY);
+end;
+
 initialization
 
   ATransitionList := TksFormTransitioIntoList.Create;
+  TransitionFading := True;
 
 finalization
 

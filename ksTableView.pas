@@ -128,6 +128,7 @@ type
   TksTableViewRowSelectAnimation = (ksRowSelectAniNone, ksRowSelectAniFromLeft, ksRowSelectAniFromRight);
   TksTableViewRowIndicatorAlign = (ksRowIndicatorLeft, ksRowIndicatorRight);
 
+  TksTableBeginRowCacheEvent = procedure(Sender: TObject; ARow:TksTableViewItem) of object;
   TksTableViewRowCacheEvent = procedure(Sender: TObject; ACanvas: TCanvas; ARow: TksTableViewItem; ARect: TRectF) of object;
   TksTableViewDeletingItemEvent = procedure(Sender: TObject; AItem: TksTableViewItem; var ACanDelete: Boolean) of object;
   TksTableViewDeleteItemEvent = procedure(Sender: TObject; AItem: TksTableViewItem) of object;
@@ -943,13 +944,19 @@ type
 
   TksTableViewItems = class(TObjectList<TksTableViewItem>)
   private
-    [weak]FTableView: TksTableView;
     FCachedCount: integer;
+    {$IFNDEF VER310}
+    [weak]FTableView: TksTableView;
     procedure UpdateIndexes;
+    {$ENDIF}
     function GetLastItem: TksTableViewItem;
     function GetFirstItem: TksTableViewItem;
     function GetItemByID(AID: string): TksTableViewItem;
   protected
+    {$IFDEF VER310}
+    [weak]FTableView: TksTableView;
+    procedure UpdateIndexes;
+    {$ENDIF}
     function GetTotalItemHeight: single;
   public
     constructor Create(ATableView: TksTableView; AOwnsObjects: Boolean); virtual;
@@ -1519,11 +1526,6 @@ type
 
   //---------------------------------------------------------------------------------------
 
-  TksAniCalc = class(TAniCalculations)
-  public
-    procedure UpdatePosImmediately;
-  end;
-
   //---------------------------------------------------------------------------------------
   // TksTableView
 
@@ -1580,6 +1582,7 @@ type
     FFixedRowOptions: TksTableViewFixedRowsOptions;
     FCascadeHeaderCheck: Boolean;
     FActionButtons: TksTableViewActionButtons;
+    //FCachedCount: integer;
 
     // events...
     FItemClickEvent: TksTableViewItemClickEvent;
@@ -1611,7 +1614,7 @@ type
     FOnIndicatorExpand: TksTableViewRowIndicatorExpandEvent;
     FOnBeforePaint : TPaintEvent;
     FOnAfterPaint : TPaintEvent;
-
+    FOnBeginRowCacheEvent: TksTableBeginRowCacheEvent;
     FItemObjectMouseUpEvent: TksTableViewItemClickEvent;
     FMouseEventsEnabledCounter: integer;
     FLastCacheClear: TDateTime;
@@ -1814,6 +1817,7 @@ type
     property OnMouseWheel;
     property OnMouseEnter;
     property OnMouseLeave;
+    property OnBeginRowCache: TksTableBeginRowCacheEvent read FOnBeginRowCacheEvent write FOnBeginRowCacheEvent;
     property OnScrollViewChange: TksTableViewScrollChangeEvent read FOnScrollViewChange write FOnScrollViewChange;
     property OnSelectDate: TksTableViewSelectDateEvent read FOnSelectDate write FOnSelectDate;
     property OnSelectPickerItem: TksTableViewSelectPickerItem read FOnSelectPickerItem write FOnSelectPickerItem;
@@ -2743,14 +2747,23 @@ begin
       Exit;
   end;
 
+  AIndex := IndexOf(AItem);
+  if AIndex = -1 then
+    Exit;
+
+  AItem.FDeleting := True;
+
+  if FTableView.UpdateCount > 0 then
+  begin
+    inherited Delete(AIndex);
+    FTableView.UpdateItemRects(False);
+    if Assigned(FTableView.OnDeleteItem) then
+      FTableView.OnDeleteItem(FTableView, AItem);
+    Exit;
+  end;
+
   FTableView.DisableMouseEvents;
   try
-
-    AIndex := IndexOf(AItem);
-    if AIndex = -1 then
-      Exit;
-
-    AItem.FDeleting := True;
     if AAnimate then
     begin
       for ICount := Trunc(AItem.Height) downto 0 do
@@ -2966,6 +2979,8 @@ begin
 
   FCaching := True;
 
+  if Assigned(FTableView.OnBeginRowCache) then
+    FTableView.OnBeginRowCache(FTableView, Self);
 
   ColumnOffset := ItemRect.Left;
 
@@ -3077,6 +3092,7 @@ begin
   end;
   OffsetRect(FItemRect,ColumnOffset,0);
   FCaching := False;
+  //Inc(FOwner.FCachedCount);
 end;
 
 procedure TksTableViewItem.Changed;
@@ -3688,6 +3704,9 @@ var
   ASeperatorMargin: single;
   ASrcRect: TRectF;
 begin
+  if _FBitmap = nil then
+    Exit;
+
   ARect := FItemRect;
 
   OffsetRect(ARect, 0, (0 - AScrollPos) + FTableView.GetStartOffsetY);
@@ -3701,113 +3720,10 @@ begin
 
   CacheItem;
 
-  (*if FTagString = '' then
-  begin
-    RealignStandardObjects;
-    FTagString := 'aligned';
-  end;
 
-  ACanvas.BeginScene;
-  try
-    if (Purpose=None) and
-       ((FTableView.FSelectionOptions.ShowSelection) and (FCanSelect)) and
-       ((FIndex = FTableView.ItemIndex) or ((Checked) and (FTableView.FCheckMarkOptions.FCheckSelects))) then
-    begin
-      ACanvas.Fill.Kind  := TBrushKind.Solid;
-
-      if FTableView.FSelectionOptions.FSelectionOverlay.Enabled then
-      begin
-        if (FTableView.FSelectionOptions.FSelectionOverlay.FStyle=ksBlankSpace) then
-          ACanvas.Fill.Color := GetColorOrDefault(FTableView.FSelectionOptions.FSelectionOverlay.BackgroundColor,C_TABLEVIEW_DEFAULT_SELECTED_COLOR)
-      end
-      else
-        ACanvas.Fill.Color := GetColorOrDefault(FTableView.Appearence.SelectedColor,C_TABLEVIEW_DEFAULT_SELECTED_COLOR);
-    end
-    else if (FFill.Kind<>TBrushKind.None) then
-      ACanvas.Fill.Assign(FFill)
-    else if (FPurpose<>None) then
-    begin
-      ACanvas.Fill.Kind  := TBrushKind.Solid;
-      ACanvas.Fill.Color := GetColorOrDefault(FTableView.Appearence.HeaderColor,
-                                   C_TABLEVIEW_DEFAULT_HEADER_COLOR)
-    end
-    else if (FTableView.Appearence.AlternatingItemBackground <> claNull) and (FIndex mod 2 = 0) then
-    begin
-      ACanvas.Fill.Kind  := TBrushKind.Solid;
-      ACanvas.Fill.Color := FTableView.Appearence.AlternatingItemBackground;
-    end
-    else
-      ACanvas.Fill.Assign(FTableView.Appearence.ItemBackground);
-
-    ACanvas.FillRect(ARect, 0, 0, AllCorners, 1);
-
-
-    //if Assigned(FTableView.BeforeRowCache) then
-    //  FTableView.BeforeRowCache(FTableView, ACanvas, Self, ARect);
-
-    // indicator...
-    if FTableView.RowIndicators.Visible then
-    begin
-      case FTableView.RowIndicators.Outlined of
-        False: FIndicator.Stroke.Kind := TBrushKind.None;
-        True: FIndicator.Stroke.Kind := TBrushKind.Solid;
-      end;
-      if FIndicator.Width = 0 then
-        FIndicator.Width := FTableView.RowIndicators.Width;
-      if Trunc(FTableView.RowIndicators.Height) <> 0 then
-        FIndicator.Height := FTableView.RowIndicators.Height
-      else
-        FIndicator.Height := Height;
-
-      FIndicator.Shape := FTableView.RowIndicators.Shape;
-      FIndicator.Render(ARect, ACanvas);
-    end;
-
-
-    //FTileBackground.Render(ARect, ACanvas);
-    //FImage.Render(ARect, ACanvas);
-    FTitle.Render(ARect, ACanvas);
-    //FSubTitle.Render(ARect, ACanvas);
-    //FDetail.Render(ARect, ACanvas);
-
-    if FTableView.AccessoryOptions.ShowAccessory then
-      FAccessory.Render(ARect, ACanvas);
-
-    if FTableView.FCheckMarkOptions.FCheckMarks <> TksTableViewCheckMarks.cmNone then
-    begin
-      if (FCheckmarkAllowed) then
-      begin
-        FCheckMarkAccessory.FTableItem := Self;
-        FCheckMarkAccessory.Render(ARect, ACanvas);
-      end;
-    end;
-
-    for ICount := 0 to FObjects.Count - 1 do
-    begin
-      if FObjects[ICount].Visible then
-      begin
-        FObjects[ICount].Render(ARect, ACanvas);
-      end;
-    end;
-
-
-
-    //FTileBackground.Render(ARect, ACanvas);
-    //FImage.Render(ARect, ACanvas);
-
-    FTitle.Render(ARect, ACanvas);
-    FSubTitle.Render(ARect, ACanvas);
-    FDetail.Render(ARect, ACanvas);
-
-    if FTableView.AccessoryOptions.ShowAccessory then
-      FAccessory.Render(ARect, ACanvas);
-  //if FBitmap = nil then
-  //  Exit;
-      *)
 
   if (TableView.FActionButtons.Visible = False) or (TableView.FActionButtons.TableItem <> Self) then
   begin
-
     ACanvas.DrawBitmap(_FBitmap, RectF(0, 0, _FBitmap.Width, _FBitmap.Height),
                        ARect, 1, True);
 
@@ -5269,13 +5185,14 @@ begin
 end;
 
 function TksTableView.GetCachedCount: integer;
-var
-  ICount: integer;
+//var
+//  ICount: integer;
 begin
-  Result := 0;
+  {Result := 0;
   for ICount := 0 to FItems.Count-1 do
     if FItems[ICount].Cached then
-      Result := Result + 1;
+      Result := Result + 1;   }
+  Result := FItems.CachedCount;
 end;
 
 function TksTableView.GetFixedFooterHeight: single;
@@ -6289,7 +6206,8 @@ begin
     HideFocusedControl;
     FActionButtons.HideButtons;
 
-    //ClearCache(ksClearCacheNonVisible);
+    if CachedCount > C_TABLEVIEW_PAGE_SIZE then
+      ClearCache(ksClearCacheNonVisible);
 
     AStep := (Value - FScrollPos) / 20;
     if AAnimate then
@@ -6309,7 +6227,8 @@ begin
     begin
       FScrollPos := Value;
       UpdateStickyHeaders;
-      Repaint;
+      //IRepaint;
+      Invalidate;
     end;
     if (Round(FScrollPos) = 0) and (FNeedsRefresh) then
     begin
@@ -9330,12 +9249,7 @@ begin
   end;
 end;
 
-{ TksAniCalc }
 
-procedure TksAniCalc.UpdatePosImmediately;
-begin
-  inherited UpdatePosImmediately(True);
-end;
 
 
 initialization
@@ -9349,6 +9263,7 @@ finalization
 
 
 end.
+
 
 
 

@@ -10,18 +10,15 @@ uses
 
 type
   TForm3 = class(TForm)
-    ksFormTransition1: TksFormTransition;
     ToolBar1: TToolBar;
     ksTableView1: TksTableView;
     ToolBar2: TToolBar;
     Label1: TLabel;
     Image1: TImage;
     ksSlideMenu1: TksSlideMenu;
-    Button1: TButton;
     procedure FormCreate(Sender: TObject);
     procedure ksTableView1ItemClick(Sender: TObject; x, y: Single;
       AItem: TksTableViewItem; AId: string; ARowObj: TksTableViewItemObject);
-    procedure Button1Click(Sender: TObject);
   private
     { Private declarations }
   public
@@ -37,15 +34,11 @@ uses untOtherForm, ksChatView;
 
 {$R *.fmx}
 
-procedure TForm3.Button1Click(Sender: TObject);
-begin
-  //BlurForm(Self);
-end;
-
 procedure TForm3.FormCreate(Sender: TObject);
 var
   AIcon: TBitmap;
 begin
+  TransitionFading := False;
   {$IFDEF MSWINDOWS}
   Width := FormFactor.Width;
   Height := FormFactor.Height;
